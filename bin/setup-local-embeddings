@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -u
+
+BASE="$HOME/.openclaw-android"
+OC_DIR="$HOME/.openclaw"
+CONFIG="$OC_DIR/openclaw.json"
+SNIPPET="$BASE/local-embeddings-snippet.json5"
+MODEL_PATH="hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
+
+say() { printf "\n==> %s\n" "$*"; }
+warn() { printf "WARN: %s\n" "$*" >&2; }
+ask_default_no() { printf "%s [y/N]: " "$1"; read -r ans || ans=""; case "${ans:-n}" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac; }
+
+mkdir -p "$BASE" "$OC_DIR"
+
+say "Experimental local embeddings setup"
+cat <<'EOF'
+Do not enable this during first install/test.
+This is manual-only and experimental on Android/Termux.
+EOF
+
+if ! command -v openclaw >/dev/null 2>&1; then
+  echo "ERROR: openclaw command not found. Install OpenClaw first." >&2
+  exit 1
+fi
+
+if command -v node >/dev/null 2>&1; then
+  node_version="$(node --version)"
+  echo "Node: $node_version"
+  node_major="$(printf "%s" "$node_version" | sed -E 's/^v([0-9]+).*/\1/')"
+  case "$node_major" in ""|*[!0-9]*) warn "Could not detect Node major version" ;; *) [ "$node_major" -ge 24 ] || warn "Node major is $node_major; provider may need Node 24+" ;; esac
+else
+  warn "node not found; plugin install may fail"
+fi
+
+say "Installing @openclaw/llama-cpp-provider"
+openclaw plugins install @openclaw/llama-cpp-provider || warn "Plugin install failed"
+
+cat > "$SNIPPET" <<EOF
+{
+  agents: {
+    defaults: {
+      memorySearch: {
+        provider: "local",
+        local: {
+          modelPath: "$MODEL_PATH",
+          contextSize: 1024
+        },
+        sync: {
+          embeddingBatchTimeoutSeconds: 900
+        }
+      }
+    }
+  }
+}
+EOF
+
+if [ -f "$CONFIG" ]; then
+  backup="$CONFIG.backup-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$CONFIG" "$backup"
+  echo "Backup: $backup"
+fi
+
+cat <<EOF
+No automatic config patch was applied.
+Snippet written to:
+  $SNIPPET
+
+Integrate it manually only after checking the current OpenClaw config schema.
+Then run:
+  openclaw doctor --fix
+  openclaw config validate
+EOF
+
+if openclaw --help 2>/dev/null | grep -q "memory"; then
+  openclaw memory status --deep --agent main || warn "memory status failed"
+  if ask_default_no "Run memory index now? This can download the model and take a long time."; then
+    openclaw memory index --force --agent main || warn "memory index failed"
+  else
+    echo "Skipped indexing."
+  fi
+else
+  echo "This OpenClaw version does not expose CLI command: memory. Skipping memory status/index."
+fi

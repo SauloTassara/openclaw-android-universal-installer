@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+MIRRORLIST="$PREFIX/etc/pacman.d/mirrorlist"
+
+say() { printf "\n==> %s\n" "$*"; }
+warn() { printf "WARN: %s\n" "$*" >&2; }
+
+if ! command -v pacman >/dev/null 2>&1; then
+  echo "pacman not found; nothing to fix."
+  exit 0
+fi
+
+say "pacman database upgrade"
+if command -v pacman-db-upgrade >/dev/null 2>&1; then
+  pacman-db-upgrade || warn "pacman-db-upgrade failed"
+else
+  warn "pacman-db-upgrade not found"
+fi
+
+if [ -f "$MIRRORLIST" ]; then
+  backup="$MIRRORLIST.bak-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$MIRRORLIST" "$backup"
+  echo "Backup: $backup"
+fi
+
+mkdir -p "$(dirname "$MIRRORLIST")"
+cat > "$MIRRORLIST" <<'EOF'
+Server = https://mirror.clarkson.edu/termux-pacman/$repo/$arch
+Server = https://mirror.meowsmp.net/termux-pacman/$repo/$arch
+Server = https://ftp.agdsn.de/termux-pacman/$repo/$arch
+Server = https://sync.termux-pacman.dev/$repo/$arch
+# service.termux-pacman.dev returned 403 in real Android testing; keep disabled.
+# Server = https://service.termux-pacman.dev/$repo/$arch
+EOF
+
+say "pacman sync/update"
+pacman -Syyu --noconfirm || {
+  warn "pacman -Syyu failed. OpenClaw glibc-runner install may fail until pacman mirrors/db are repaired."
+  exit 1
+}

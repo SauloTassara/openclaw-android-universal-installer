@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -u
+
+echo "openclaw:"
+openclaw --version 2>/dev/null || echo "openclaw not found"
+echo
+echo "config:"
+openclaw config validate 2>/dev/null || echo "config validate failed or openclaw not ready"
+echo
+echo "tmux:"
+if tmux has-session -t openclaw 2>/dev/null; then
+  echo "Gateway appears running in tmux session: openclaw"
+fi
+tmux ls 2>/dev/null || echo "no tmux sessions"
+echo
+echo "Termux:Boot:"
+if [ -x "$HOME/.termux/boot/00-openclaw" ]; then
+  echo "~/.termux/boot/00-openclaw exists and is executable"
+else
+  echo "~/.termux/boot/00-openclaw missing or not executable"
+fi
+echo
+echo "API env:"
+if [ -f "$HOME/.openclaw/android-provider.env" ]; then
+  echo "~/.openclaw/android-provider.env exists (keys hidden)"
+else
+  echo "~/.openclaw/android-provider.env not found"
+fi
+echo
+echo "log:"
+tail -n 100 "$HOME/.openclaw-android/logs/openclaw-gateway.log" 2>/dev/null || echo "No gateway log yet"
