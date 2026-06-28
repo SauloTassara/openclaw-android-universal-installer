@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -u
+
+run_android() {
+  local cmd="$*"
+  if command -v rish >/dev/null 2>&1 && rish -c 'id' >/dev/null 2>&1; then
+    rish -c "$cmd"
+  elif command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
+    adb shell "$cmd"
+  else
+    return 127
+  fi
+}
+
+try() {
+  echo "+ $*"
+  run_android "$@" || echo "WARN: failed or unsupported: $*"
+}
+
+if ! run_android 'id' >/dev/null 2>&1; then
+  cat <<'EOF'
+No rish/adb session available.
+Start Shizuku Wireless Debugging or connect adb, then rerun:
+  android-hardening
+EOF
+  exit 1
+fi
+
+try settings put global settings_enable_monitor_phantom_procs false
+try settings get global settings_enable_monitor_phantom_procs
+try cmd deviceidle whitelist +com.termux
+try cmd deviceidle whitelist +com.termux.boot
+try cmd appops set com.termux RUN_ANY_IN_BACKGROUND allow
+try cmd appops set com.termux RUN_IN_BACKGROUND allow
+
+echo "Opening battery optimization/settings screens for manual confirmation if Android requires it."
+try am start -a android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+try am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:com.termux

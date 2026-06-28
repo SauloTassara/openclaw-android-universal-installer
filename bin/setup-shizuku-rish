@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+SRC_DIRS="/sdcard/Shizuku $HOME/storage/shared/Shizuku"
+
+for dir in $SRC_DIRS; do
+  if [ -f "$dir/rish" ] && [ -f "$dir/rish_shizuku.dex" ]; then
+    mkdir -p "$PREFIX/bin"
+    cp -f "$dir/rish" "$PREFIX/bin/rish"
+    cp -f "$dir/rish_shizuku.dex" "$PREFIX/bin/rish_shizuku.dex"
+    chmod +x "$PREFIX/bin/rish"
+    chmod 0444 "$PREFIX/bin/rish_shizuku.dex" 2>/dev/null || true
+    if grep -q "RISH_APPLICATION_ID" "$PREFIX/bin/rish" 2>/dev/null; then
+      :
+    else
+      sed -i '2i [ -z "$RISH_APPLICATION_ID" ] && export RISH_APPLICATION_ID="com.termux"' "$PREFIX/bin/rish" 2>/dev/null || true
+    fi
+    echo "Installed rish from $dir"
+    rish -c 'id' || {
+      echo "rish installed, but Shizuku is not running or Termux is not authorized yet."
+      exit 2
+    }
+    exit 0
+  fi
+done
+
+cat <<'EOF'
+rish files not found.
+
+Open Shizuku:
+  Use Shizuku in terminal apps -> Export files -> choose Internal storage/Shizuku
+
+Expected files:
+  /sdcard/Shizuku/rish
+  /sdcard/Shizuku/rish_shizuku.dex
+
+Then run:
+  setup-shizuku-rish
+EOF
+exit 1
