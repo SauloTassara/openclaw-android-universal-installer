@@ -3,8 +3,9 @@ set -u
 
 run_android() {
   local cmd="$*"
-  if command -v rish >/dev/null 2>&1 && rish -c 'id' >/dev/null 2>&1; then
-    rish -c "$cmd"
+  export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
+  if command -v rish >/dev/null 2>&1 && RISH_APPLICATION_ID=com.termux rish -c 'id' >/dev/null 2>&1; then
+    RISH_APPLICATION_ID=com.termux rish -c "$cmd"
   elif command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then
     adb shell "$cmd"
   else
@@ -36,3 +37,12 @@ try cmd appops set com.termux RUN_IN_BACKGROUND allow
 echo "Opening battery optimization/settings screens for manual confirmation if Android requires it."
 try am start -a android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
 try am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:com.termux
+
+echo
+echo "Current checks:"
+printf "Phantom Process Killer: "
+run_android settings get global settings_enable_monitor_phantom_procs 2>/dev/null || echo "unknown"
+echo "Doze whitelist:"
+run_android cmd deviceidle whitelist 2>/dev/null | grep -E 'com\.termux(\.boot)?' || echo "unknown or not listed"
+echo
+echo "Reminder: set Termux, Termux:Boot, Termux:API, and Shizuku battery usage to Unrestricted if Android requires confirmation."

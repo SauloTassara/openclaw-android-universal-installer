@@ -2,7 +2,24 @@
 set -u
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
-SRC_DIRS="/sdcard/Shizuku $HOME/storage/shared/Shizuku"
+SRC_DIRS="/sdcard/Shizuku $HOME/storage/shared/Shizuku /storage/emulated/0/Shizuku"
+
+append_once() {
+  file="$1"
+  line="$2"
+  touch "$file"
+  grep -Fqx "$line" "$file" || printf "\n%s\n" "$line" >> "$file"
+}
+
+export RISH_APPLICATION_ID=com.termux
+append_once "$HOME/.bashrc" 'export RISH_APPLICATION_ID=com.termux'
+append_once "$HOME/.profile" 'export RISH_APPLICATION_ID=com.termux'
+
+if [ ! -d "$HOME/storage/shared" ]; then
+  echo "Termux storage is not configured. If export files are not visible, run:"
+  echo "  termux-setup-storage"
+  echo
+fi
 
 for dir in $SRC_DIRS; do
   if [ -f "$dir/rish" ] && [ -f "$dir/rish_shizuku.dex" ]; then
@@ -11,17 +28,25 @@ for dir in $SRC_DIRS; do
     cp -f "$dir/rish_shizuku.dex" "$PREFIX/bin/rish_shizuku.dex"
     chmod +x "$PREFIX/bin/rish"
     chmod 0444 "$PREFIX/bin/rish_shizuku.dex" 2>/dev/null || true
-    if grep -q "RISH_APPLICATION_ID" "$PREFIX/bin/rish" 2>/dev/null; then
-      :
-    else
+    if ! grep -q "RISH_APPLICATION_ID" "$PREFIX/bin/rish" 2>/dev/null; then
       sed -i '2i [ -z "$RISH_APPLICATION_ID" ] && export RISH_APPLICATION_ID="com.termux"' "$PREFIX/bin/rish" 2>/dev/null || true
     fi
     echo "Installed rish from $dir"
-    rish -c 'id' || {
-      echo "rish installed, but Shizuku is not running or Termux is not authorized yet."
-      exit 2
-    }
-    exit 0
+    if RISH_APPLICATION_ID=com.termux rish -c 'id'; then
+      echo "Success. uid=2000(shell) means Shizuku/rish is working."
+      exit 0
+    fi
+    cat <<'EOF'
+rish installed, but test failed.
+
+Check:
+  1. Open Shizuku.
+  2. Start Shizuku by Wireless Debugging.
+  3. Authorize Termux.
+  4. Export terminal files again if needed.
+  5. Run: setup-shizuku-rish
+EOF
+    exit 2
   fi
 done
 
@@ -37,5 +62,8 @@ Expected files:
 
 Then run:
   setup-shizuku-rish
+
+If Termux cannot see storage, run:
+  termux-setup-storage
 EOF
 exit 1

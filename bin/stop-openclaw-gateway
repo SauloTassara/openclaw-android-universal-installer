@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -u
+
+if tmux kill-session -t openclaw 2>/dev/null; then
+  echo "openclaw gateway stopped"
+else
+  echo "openclaw gateway not running"
+fi

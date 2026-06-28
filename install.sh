@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -u
 
+# Interactive installer. Download to a file and run with bash; do not use curl | bash.
+RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/main}"
 LOG_DIR="$HOME/.logs"
 LOG_FILE="$LOG_DIR/openclaw-android-installer.log"
 BASE_DIR="$HOME/.openclaw-android"
 BIN_DIR="$BASE_DIR/bin"
-OC_WORKSPACE="$HOME/.openclaw/workspace"
+OC_DIR="$HOME/.openclaw"
+OC_WORKSPACE="$OC_DIR/workspace"
 BOOT_DIR="$HOME/.termux/boot"
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 
@@ -14,29 +17,49 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 say() { printf "\n==> %s\n" "$*"; }
 warn() { printf "WARN: %s\n" "$*" >&2; }
+
 ask_default_yes() {
   printf "%s [Y/n]: " "$1"
   read -r ans || ans=""
   case "${ans:-y}" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
+ask_default_no() {
+  printf "%s [y/N]: " "$1"
+  read -r ans || ans=""
+  case "${ans:-n}" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
 append_once() {
-  file="$1"; line="$2"
+  file="$1"
+  line="$2"
   touch "$file"
   grep -Fqx "$line" "$file" || printf "\n%s\n" "$line" >> "$file"
 }
 
-install_script() {
+download_bin() {
   name="$1"
+  url="$RAW_BASE/bin/$name"
   target="$BIN_DIR/$name"
-  cat > "$target"
+  say "Installing $name"
+  if ! curl -fsSL "$url" -o "$target"; then
+    echo "ERROR: failed to download $url" >&2
+    return 1
+  fi
   chmod +x "$target"
+}
+
+link_bin() {
+  source="$1"
+  target="$2"
+  ln -sf "$BIN_DIR/$source" "$PREFIX/bin/$target"
 }
 
 say "OpenClaw Android universal installer"
 echo "Log: $LOG_FILE"
 echo "Android: $(getprop ro.build.version.release 2>/dev/null || echo unknown)"
 echo "Arch: $(uname -m)"
+echo "RAW_BASE: $RAW_BASE"
 
 if [ ! -d "$PREFIX" ]; then
   echo "This installer is intended for Termux from F-Droid."
@@ -56,133 +79,50 @@ pkg install -y curl git nodejs openssh tmux nano android-tools nmap jq coreutils
   warn "Some packages failed. Re-run install.sh after checking Termux mirrors."
 }
 
-say "Installing OpenClaw official Android method"
+if ! command -v termux-wake-lock >/dev/null 2>&1; then
+  warn "termux-wake-lock not found. Install Termux:API app from F-Droid for reliable wake locks."
+fi
+
+say "Downloading helper scripts from repo"
+download_bin phone_control.sh || exit 1
+download_bin setup-shizuku-rish || exit 1
+download_bin android-hardening || exit 1
+download_bin fix-termux-pacman || exit 1
+download_bin start-openclaw-gateway || exit 1
+download_bin stop-openclaw-gateway || exit 1
+download_bin restart-openclaw-gateway || exit 1
+download_bin status-openclaw-gateway || exit 1
+download_bin setup-local-embeddings || exit 1
+
+say "Linking commands"
+link_bin start-openclaw-gateway oc-start
+link_bin stop-openclaw-gateway oc-stop
+link_bin restart-openclaw-gateway oc-restart
+link_bin status-openclaw-gateway oc-status
+link_bin phone_control.sh phone-control
+link_bin android-hardening android-hardening
+link_bin setup-shizuku-rish setup-shizuku-rish
+link_bin fix-termux-pacman fix-termux-pacman
+link_bin setup-local-embeddings oc-setup-local-embeddings
+
+if command -v pacman >/dev/null 2>&1; then
+  say "Termux pacman preflight"
+  fix-termux-pacman || warn "pacman preflight failed; OpenClaw installer may still repair or fail with details"
+fi
+
+say "Installing OpenClaw official latest/stable"
 if command -v openclaw >/dev/null 2>&1; then
   echo "OpenClaw already installed: $(openclaw --version 2>/dev/null || true)"
 else
-  curl -sL https://myopenclawhub.com/install | bash || warn "OpenClaw installer failed. Check $LOG_FILE."
+  curl -fsSL https://myopenclawhub.com/install | bash || warn "OpenClaw core install failed. Check $LOG_FILE."
 fi
 
-if ask_default_yes "Try OpenClaw beta update now?"; then
-  say "OpenClaw beta dry-run"
-  openclaw update --channel beta --dry-run || warn "Beta dry-run failed; keeping current install"
-  say "OpenClaw beta update"
-  openclaw update --channel beta --yes || warn "Beta update failed; stable/latest remains usable if installed"
+if command -v openclaw >/dev/null 2>&1; then
+  openclaw --version || true
+  openclaw config validate || true
+else
+  warn "OpenClaw core not installed; gateway will not work until fixed."
 fi
-
-say "Writing helper scripts"
-install_script phone_control.sh <<'PHONE'
-#!/usr/bin/env bash
-set -u
-usage(){ cat <<'EOF'
-Usage: phone-control <command> [args]
-home | back | recent | tap X Y | swipe X1 Y1 X2 Y2 [duration_ms] | text TEXT
-open-app PACKAGE | open-url URL | screenshot [PATH_ON_SDCARD] | ui-dump | battery | brightness VALUE_0_255
-EOF
-}
-die(){ echo "ERROR: $*" >&2; exit 1; }
-quote_shell(){ printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
-have_adb_device(){ command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; }
-run_android(){
-  cmd="$*"
-  if command -v rish >/dev/null 2>&1 && rish -c 'id' >/dev/null 2>&1; then rish -c "$cmd"
-  elif have_adb_device; then adb shell "$cmd"
-  else sh -c "$cmd" 2>/dev/null || die "No rish/adb available. Start Shizuku or connect adb."
-  fi
-}
-cmd="${1:-}"; [ -n "$cmd" ] || { usage; exit 1; }; shift || true
-case "$cmd" in
-  home) run_android "input keyevent 3" ;;
-  back) run_android "input keyevent 4" ;;
-  recent) run_android "input keyevent 187" ;;
-  tap) [ $# -eq 2 ] || die "tap needs X Y"; run_android "input tap $1 $2" ;;
-  swipe) [ $# -ge 4 ] || die "swipe needs X1 Y1 X2 Y2 [duration_ms]"; run_android "input swipe $1 $2 $3 $4 ${5:-300}" ;;
-  text) [ $# -ge 1 ] || die "text needs text"; encoded="$(printf "%s" "$*" | sed 's/%/%25/g; s/ /%s/g')"; run_android "input text '$(quote_shell "$encoded")'" ;;
-  open-app) [ $# -eq 1 ] || die "open-app needs package"; run_android "monkey -p '$(quote_shell "$1")' -c android.intent.category.LAUNCHER 1" ;;
-  open-url) [ $# -eq 1 ] || die "open-url needs URL"; run_android "am start -a android.intent.action.VIEW -d '$(quote_shell "$1")'" ;;
-  screenshot) path="${1:-/sdcard/openclaw_screenshot_$(date +%Y%m%d_%H%M%S).png}"; run_android "screencap -p '$(quote_shell "$path")'"; echo "$path" ;;
-  ui-dump) remote="/sdcard/openclaw_window_dump.xml"; run_android "uiautomator dump '$remote' >/dev/null"; run_android "cat '$remote'" ;;
-  battery) run_android "dumpsys battery" ;;
-  brightness) [ $# -eq 1 ] || die "brightness needs 0..255"; case "$1" in *[!0-9]*|"") die "brightness numeric" ;; esac; [ "$1" -ge 0 ] && [ "$1" -le 255 ] || die "brightness 0..255"; run_android "settings put system screen_brightness $1" ;;
-  help|-h|--help) usage ;;
-  *) usage; exit 1 ;;
-esac
-PHONE
-
-install_script setup-shizuku-rish <<'RISH'
-#!/usr/bin/env bash
-set -u
-PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
-for dir in /sdcard/Shizuku "$HOME/storage/shared/Shizuku"; do
-  if [ -f "$dir/rish" ] && [ -f "$dir/rish_shizuku.dex" ]; then
-    cp -f "$dir/rish" "$PREFIX/bin/rish"
-    cp -f "$dir/rish_shizuku.dex" "$PREFIX/bin/rish_shizuku.dex"
-    chmod +x "$PREFIX/bin/rish"
-    chmod 0444 "$PREFIX/bin/rish_shizuku.dex" 2>/dev/null || true
-    grep -q "RISH_APPLICATION_ID" "$PREFIX/bin/rish" 2>/dev/null || sed -i '2i [ -z "$RISH_APPLICATION_ID" ] && export RISH_APPLICATION_ID="com.termux"' "$PREFIX/bin/rish" 2>/dev/null || true
-    echo "Installed rish from $dir"
-    rish -c 'id' || { echo "rish installed, but Shizuku is not running/authorized."; exit 2; }
-    exit 0
-  fi
-done
-cat <<'EOF'
-rish files not found.
-Shizuku -> Use Shizuku in terminal apps -> Export files -> /sdcard/Shizuku
-Then run: setup-shizuku-rish
-EOF
-exit 1
-RISH
-
-install_script android-hardening <<'HARDEN'
-#!/usr/bin/env bash
-set -u
-run_android(){ cmd="$*"; if command -v rish >/dev/null 2>&1 && rish -c 'id' >/dev/null 2>&1; then rish -c "$cmd"; elif command -v adb >/dev/null 2>&1 && adb get-state >/dev/null 2>&1; then adb shell "$cmd"; else return 127; fi; }
-try(){ echo "+ $*"; run_android "$@" || echo "WARN: failed/unsupported: $*"; }
-run_android 'id' >/dev/null 2>&1 || { echo "No rish/adb. Start Shizuku or adb, then rerun android-hardening."; exit 1; }
-try settings put global settings_enable_monitor_phantom_procs false
-try settings get global settings_enable_monitor_phantom_procs
-try cmd deviceidle whitelist +com.termux
-try cmd deviceidle whitelist +com.termux.boot
-try cmd appops set com.termux RUN_ANY_IN_BACKGROUND allow
-try cmd appops set com.termux RUN_IN_BACKGROUND allow
-try am start -a android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-try am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:com.termux
-HARDEN
-
-install_script start-openclaw-gateway <<'START'
-#!/usr/bin/env bash
-set -u
-BASE="$HOME/.openclaw-android"
-LOG="$BASE/logs/openclaw-gateway.log"
-mkdir -p "$BASE/logs"
-tmux has-session -t openclaw 2>/dev/null && { echo "openclaw gateway already running"; exit 0; }
-tmux new-session -d -s openclaw "bash -lc 'source ~/.bashrc 2>/dev/null || true; export NODE_OPTIONS=--dns-result-order=ipv4first; openclaw gateway >> \"$LOG\" 2>&1'"
-echo "openclaw gateway started in tmux session: openclaw"
-START
-
-install_script stop-openclaw-gateway <<'STOP'
-#!/usr/bin/env bash
-tmux kill-session -t openclaw 2>/dev/null && echo "openclaw gateway stopped" || echo "openclaw gateway not running"
-STOP
-
-install_script status-openclaw-gateway <<'STATUS'
-#!/usr/bin/env bash
-echo "tmux:"
-tmux ls 2>/dev/null || true
-echo
-echo "openclaw:"
-openclaw --version 2>/dev/null || true
-echo
-echo "log:"
-tail -n 80 "$HOME/.openclaw-android/logs/openclaw-gateway.log" 2>/dev/null || echo "No gateway log yet"
-STATUS
-
-install_script restart-openclaw-gateway <<'RESTART'
-#!/usr/bin/env bash
-stop-openclaw-gateway
-sleep 1
-start-openclaw-gateway
-RESTART
 
 cat > "$OC_WORKSPACE/AGENTS.md" <<'AGENTS'
 # OpenClaw Android Termux Agent Rules
@@ -197,18 +137,11 @@ Do not use arbitrary shell execution for phone control.
 If an action is irreversible or security-sensitive, ask for confirmation first.
 AGENTS
 
-say "Linking commands"
-ln -sf "$BIN_DIR/start-openclaw-gateway" "$PREFIX/bin/oc-start"
-ln -sf "$BIN_DIR/stop-openclaw-gateway" "$PREFIX/bin/oc-stop"
-ln -sf "$BIN_DIR/restart-openclaw-gateway" "$PREFIX/bin/oc-restart"
-ln -sf "$BIN_DIR/status-openclaw-gateway" "$PREFIX/bin/oc-status"
-ln -sf "$BIN_DIR/phone_control.sh" "$PREFIX/bin/phone-control"
-ln -sf "$BIN_DIR/android-hardening" "$PREFIX/bin/android-hardening"
-ln -sf "$BIN_DIR/setup-shizuku-rish" "$PREFIX/bin/setup-shizuku-rish"
-
 cat > "$BOOT_DIR/00-openclaw" <<'BOOT'
 #!/data/data/com.termux/files/usr/bin/sh
-termux-wake-lock >/dev/null 2>&1 || true
+if [ -x /data/data/com.termux/files/usr/bin/termux-wake-lock ]; then
+  /data/data/com.termux/files/usr/bin/termux-wake-lock >/dev/null 2>&1 || true
+fi
 sleep 20
 exec /data/data/com.termux/files/usr/bin/oc-start >/dev/null 2>&1
 BOOT
@@ -229,39 +162,54 @@ case "$provider" in
     read -r api_key || api_key=""
     stty echo 2>/dev/null || true
     printf "\n"
-    mkdir -p "$HOME/.openclaw"
-    chmod 700 "$HOME/.openclaw"
-    key_file="$HOME/.openclaw/android-provider.env"
-    if [ "$provider" = "gemini" ]; then
-      printf "export GEMINI_API_KEY='%s'\n" "$api_key" > "$key_file"
+    if [ -z "$api_key" ]; then
+      warn "Empty key; existing provider env was not modified."
     else
-      printf "export DEEPSEEK_API_KEY='%s'\n" "$api_key" > "$key_file"
-    fi
-    chmod 600 "$key_file"
-    append_once "$HOME/.bashrc" 'source ~/.openclaw/android-provider.env 2>/dev/null || true'
-    echo "Saved provider env in ~/.openclaw/android-provider.env"
-    if command -v openclaw >/dev/null 2>&1; then
+      mkdir -p "$OC_DIR"
+      chmod 700 "$OC_DIR"
+      key_file="$OC_DIR/android-provider.env"
+      if [ "$provider" = "gemini" ]; then
+        printf 'export GEMINI_API_KEY=%q\n' "$api_key" > "$key_file"
+      else
+        printf 'export DEEPSEEK_API_KEY=%q\n' "$api_key" > "$key_file"
+      fi
+      chmod 600 "$key_file"
+      append_once "$HOME/.bashrc" 'source ~/.openclaw/android-provider.env 2>/dev/null || true'
+      echo "Saved provider env in ~/.openclaw/android-provider.env"
       echo "Run openclaw onboard if provider-specific onboarding is still needed."
     fi
     ;;
-  *) echo "Skipping API key setup. Run openclaw onboard later." ;;
+  *) echo "Skipping API key setup. Existing env was not modified." ;;
 esac
 
 if ask_default_yes "Run android-hardening now if rish/adb is available?"; then
   android-hardening || warn "android-hardening skipped or partially failed"
 fi
 
-if ask_default_yes "Start OpenClaw Gateway now?"; then
-  oc-start || warn "gateway start failed"
+if command -v openclaw >/dev/null 2>&1; then
+  if ask_default_yes "Start OpenClaw Gateway now?"; then
+    oc-start || warn "gateway start failed"
+  fi
+  echo "Experimental local embeddings are not recommended during first install/test."
+  if ask_default_no "Configure experimental local embeddings now?"; then
+    oc-setup-local-embeddings || warn "local embeddings setup failed"
+  else
+    echo "Later: run oc-setup-local-embeddings"
+  fi
+else
+  warn "Skipping gateway start and local embeddings because openclaw is not installed."
 fi
 
 say "Done"
 cat <<EOF
 Commands:
+  openclaw --version
+  openclaw config validate
   oc-status
   phone-control battery
   phone-control ui-dump
   android-hardening
+  tmux ls
   tail -n 100 ~/.openclaw-android/logs/openclaw-gateway.log
 
 Log:
