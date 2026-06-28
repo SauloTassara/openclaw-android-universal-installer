@@ -55,6 +55,63 @@ link_bin() {
   ln -sf "$BIN_DIR/$source" "$PREFIX/bin/$target"
 }
 
+refresh_path() {
+  export PATH="$PREFIX/bin:$HOME/.local/bin:$BIN_DIR:$PATH"
+  hash -r 2>/dev/null || true
+}
+
+print_openclaw_failure_diagnostics() {
+  echo
+  echo "ERROR: OpenClaw core was not installed or is not visible in PATH." >&2
+  echo "This installer must not continue without the real openclaw CLI." >&2
+  echo
+  echo "Diagnostics:" >&2
+  echo "  PATH=$PATH" >&2
+  echo "  Android=$(getprop ro.build.version.release 2>/dev/null || echo unknown)" >&2
+  echo "  SDK=$(getprop ro.build.version.sdk 2>/dev/null || echo unknown)" >&2
+  echo "  Model=$(getprop ro.product.model 2>/dev/null || echo unknown)" >&2
+  echo "  Device=$(getprop ro.product.device 2>/dev/null || echo unknown)" >&2
+  echo "  ABI=$(getprop ro.product.cpu.abi 2>/dev/null || echo unknown)" >&2
+  echo "  uname=$(uname -m 2>/dev/null || echo unknown)" >&2
+  if command -v getconf >/dev/null 2>&1; then
+    echo "  PAGE_SIZE=$(getconf PAGE_SIZE 2>/dev/null || echo unknown)" >&2
+  fi
+  echo "  node=$(command -v node 2>/dev/null || echo missing) $(node -v 2>/dev/null || true)" >&2
+  echo "  npm=$(command -v npm 2>/dev/null || echo missing) $(npm -v 2>/dev/null || true)" >&2
+  echo "  curl=$(command -v curl 2>/dev/null || echo missing)" >&2
+  echo
+  echo "OpenClaw files found:" >&2
+  find "$HOME" "$PREFIX" -maxdepth 6 -type f -iname '*openclaw*' 2>/dev/null | head -n 80 >&2 || true
+  echo
+  echo "Last installer log lines:" >&2
+  tail -n 160 "$LOG_FILE" >&2 || true
+}
+
+install_openclaw_core() {
+  refresh_path
+
+  if command -v openclaw >/dev/null 2>&1; then
+    echo "OpenClaw already installed: $(openclaw --version 2>/dev/null || true)"
+    return 0
+  fi
+
+  official_installer="$BASE_DIR/openclaw-official-install.sh"
+  say "Downloading OpenClaw official installer"
+  curl -fsSL https://myopenclawhub.com/install -o "$official_installer" || return 1
+  chmod +x "$official_installer"
+
+  say "Running OpenClaw official latest/stable installer"
+  bash "$official_installer"
+
+  refresh_path
+  if command -v openclaw >/dev/null 2>&1; then
+    openclaw --version || true
+    return 0
+  fi
+
+  return 1
+}
+
 say "OpenClaw Android universal installer"
 echo "Log: $LOG_FILE"
 echo "Android: $(getprop ro.build.version.release 2>/dev/null || echo unknown)"
@@ -66,7 +123,10 @@ if [ ! -d "$PREFIX" ]; then
   exit 1
 fi
 
+refresh_path
 export NODE_OPTIONS=--dns-result-order=ipv4first
+append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:/data/data/com.termux/files/usr/bin:$PATH"'
+append_once "$HOME/.profile" 'export PATH="$HOME/.local/bin:/data/data/com.termux/files/usr/bin:$PATH"'
 append_once "$HOME/.bashrc" 'export NODE_OPTIONS=--dns-result-order=ipv4first'
 append_once "$HOME/.profile" 'export NODE_OPTIONS=--dns-result-order=ipv4first'
 append_once "$HOME/.bashrc" 'export RISH_APPLICATION_ID=com.termux'
@@ -80,6 +140,7 @@ say "Installing dependencies"
 pkg install -y curl git nodejs openssh tmux nano android-tools nmap jq coreutils procps termux-api termux-exec || {
   warn "Some packages failed. Re-run install.sh after checking Termux mirrors."
 }
+refresh_path
 
 if ! command -v termux-wake-lock >/dev/null 2>&1; then
   warn "termux-wake-lock not found. Install Termux:API app from F-Droid for reliable wake locks."
@@ -107,6 +168,7 @@ link_bin android-hardening android-hardening
 link_bin setup-shizuku-rish setup-shizuku-rish
 link_bin fix-termux-pacman fix-termux-pacman
 link_bin setup-local-embeddings oc-setup-local-embeddings
+refresh_path
 
 if command -v pacman >/dev/null 2>&1; then
   say "Termux pacman preflight"
@@ -114,17 +176,15 @@ if command -v pacman >/dev/null 2>&1; then
 fi
 
 say "Installing OpenClaw official latest/stable"
-if command -v openclaw >/dev/null 2>&1; then
-  echo "OpenClaw already installed: $(openclaw --version 2>/dev/null || true)"
-else
-  curl -fsSL https://myopenclawhub.com/install | bash || warn "OpenClaw core install failed. Check $LOG_FILE."
+if ! install_openclaw_core; then
+  print_openclaw_failure_diagnostics
+  exit 1
 fi
 
-if command -v openclaw >/dev/null 2>&1; then
-  openclaw --version || true
-  openclaw config validate || true
-else
-  warn "OpenClaw core not installed; gateway will not work until fixed."
+if ! openclaw config validate; then
+  warn "OpenClaw config validation failed. Trying openclaw doctor --fix."
+  openclaw doctor --fix || true
+  openclaw config validate || warn "OpenClaw config still invalid; gateway may not start until onboarding/config is fixed."
 fi
 
 cat > "$OC_WORKSPACE/AGENTS.md" <<'AGENTS'
@@ -217,18 +277,15 @@ if ask_default_yes "Run android-hardening now if rish/adb is available?"; then
   android-hardening || warn "android-hardening skipped or partially failed"
 fi
 
-if command -v openclaw >/dev/null 2>&1; then
-  if ask_default_yes "Start OpenClaw Gateway now?"; then
-    oc-start || warn "gateway start failed"
-  fi
-  echo "Experimental local embeddings are not recommended during first install/test."
-  if ask_default_no "Configure experimental local embeddings now?"; then
-    oc-setup-local-embeddings || warn "local embeddings setup failed"
-  else
-    echo "Later: run oc-setup-local-embeddings"
-  fi
+if ask_default_yes "Start OpenClaw Gateway now?"; then
+  oc-start || warn "gateway start failed"
+fi
+
+echo "Experimental local embeddings are not recommended during first install/test."
+if ask_default_no "Configure experimental local embeddings now?"; then
+  oc-setup-local-embeddings || warn "local embeddings setup failed"
 else
-  warn "Skipping gateway start and local embeddings because openclaw is not installed."
+  echo "Later: run oc-setup-local-embeddings"
 fi
 
 say "Done"
