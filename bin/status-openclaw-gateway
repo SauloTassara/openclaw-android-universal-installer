@@ -1,31 +1,62 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/bash
 set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+BASE="$HOME/.openclaw-android"
+OC_ENV="$HOME/.openclaw/android-provider.env"
+
+export PATH="$PREFIX/bin:$HOME/.local/bin:$BASE/bin:$PATH"
 
 echo "openclaw:"
 openclaw --version 2>/dev/null || echo "openclaw not found"
 echo
+
 echo "config:"
 openclaw config validate 2>/dev/null || echo "config validate failed or openclaw not ready"
 echo
+
 echo "tmux:"
 if tmux has-session -t openclaw 2>/dev/null; then
   echo "Gateway appears running in tmux session: openclaw"
 fi
 tmux ls 2>/dev/null || echo "no tmux sessions"
 echo
+
 echo "Termux:Boot:"
+if [ -d "$HOME/.termux/boot" ]; then
+  ls -la "$HOME/.termux/boot" 2>/dev/null || true
+else
+  echo "~/.termux/boot missing"
+fi
 if [ -x "$HOME/.termux/boot/00-openclaw" ]; then
   echo "~/.termux/boot/00-openclaw exists and is executable"
 else
   echo "~/.termux/boot/00-openclaw missing or not executable"
 fi
 echo
+
 echo "API env:"
-if [ -f "$HOME/.openclaw/android-provider.env" ]; then
+if [ -f "$OC_ENV" ]; then
   echo "~/.openclaw/android-provider.env exists (keys hidden)"
 else
   echo "~/.openclaw/android-provider.env not found"
 fi
 echo
-echo "log:"
-tail -n 100 "$HOME/.openclaw-android/logs/openclaw-gateway.log" 2>/dev/null || echo "No gateway log yet"
+
+echo "runtime helpers:"
+for f in start-openclaw-gateway run-openclaw-gateway stop-openclaw-gateway restart-openclaw-gateway; do
+  if [ -x "$BASE/bin/$f" ]; then
+    first_line="$(head -n 1 "$BASE/bin/$f" 2>/dev/null || true)"
+    echo "$f: executable ($first_line)"
+  else
+    echo "$f: missing or not executable"
+  fi
+done
+echo
+
+echo "boot log:"
+tail -n 80 "$BASE/logs/boot.log" 2>/dev/null || echo "No boot log yet"
+echo
+
+echo "gateway log:"
+tail -n 120 "$BASE/logs/openclaw-gateway.log" 2>/dev/null || echo "No gateway log yet"
