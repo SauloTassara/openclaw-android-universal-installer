@@ -102,6 +102,7 @@ download_bin start-openclaw-gateway || exit 1
 download_bin stop-openclaw-gateway || exit 1
 download_bin restart-openclaw-gateway || exit 1
 download_bin status-openclaw-gateway || exit 1
+download_bin setup-local-embeddings || exit 1
 
 say "Linking commands"
 link_bin start-openclaw-gateway oc-start
@@ -111,6 +112,7 @@ link_bin status-openclaw-gateway oc-status
 link_bin phone_control.sh phone-control
 link_bin android-hardening android-hardening
 link_bin setup-shizuku-rish setup-shizuku-rish
+link_bin setup-local-embeddings oc-setup-local-embeddings
 
 cat > "$OC_WORKSPACE/AGENTS.md" <<'AGENTS'
 # OpenClaw Android Termux Agent Rules
@@ -178,6 +180,13 @@ if ask_default_yes "Start OpenClaw Gateway now?"; then
   oc-start || warn "gateway start failed"
 fi
 
+printf "Configure experimental local embeddings now? [y/N]: "
+read -r local_embeddings_ans || local_embeddings_ans=""
+case "${local_embeddings_ans:-n}" in
+  y|Y|yes|YES) oc-setup-local-embeddings || warn "local embeddings setup failed" ;;
+  *) echo "Later: run oc-setup-local-embeddings" ;;
+esac
+
 say "Done"
 cat <<EOF
 Commands:
@@ -185,6 +194,7 @@ Commands:
   phone-control battery
   phone-control ui-dump
   android-hardening
+  oc-setup-local-embeddings
   tmux ls
   tail -n 100 ~/.openclaw-android/logs/openclaw-gateway.log
 

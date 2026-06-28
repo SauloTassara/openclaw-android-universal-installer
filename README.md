@@ -189,6 +189,39 @@ Fallback stable:
 openclaw update --channel stable --yes
 ```
 
+## Experimental local embeddings
+
+OpenClaw official local embeddings can use `@openclaw/llama-cpp-provider` with GGUF models.
+
+Recommended Android experiment:
+
+```text
+EmbeddingGemma 300M Q8_0
+hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf
+```
+
+This is not enabled by default. The installer does not download the model during normal setup, and local embeddings are not required for OpenClaw Gateway. Keep the first test focused on Gateway + Gemini or DeepSeek cloud.
+
+Reason: `node-llama-cpp` is a native dependency and can fail on Termux/Android depending on Node, compiler, ABI, RAM, and thermal limits.
+
+Opt in later:
+
+```bash
+oc-setup-local-embeddings
+```
+
+Verify:
+
+```bash
+openclaw plugins list
+openclaw memory status --deep --agent main
+openclaw memory index --force --agent main
+```
+
+`oc-setup-local-embeddings` installs the plugin, backs up `~/.openclaw/openclaw.json`, tries a safe JSON patch, writes `~/.openclaw-android/local-embeddings-snippet.json5` if patching is unsafe, and only runs `openclaw memory index --force --agent main` after explicit confirmation.
+
+On Android 12, test this only with enough RAM, battery, and cooling. On Pixel 9 Android 17, test it after Gateway is stable across reboot and Shizuku limitations are understood.
+
 ## Uninstall
 
 ```bash

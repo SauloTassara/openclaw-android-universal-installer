@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -u
+
+BASE="$HOME/.openclaw-android"
+OC_DIR="$HOME/.openclaw"
+CONFIG="$OC_DIR/openclaw.json"
+SNIPPET="$BASE/local-embeddings-snippet.json5"
+MODEL_PATH="hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf"
+
+say() { printf "\n==> %s\n" "$*"; }
+warn() { printf "WARN: %s\n" "$*" >&2; }
+
+ask_default_no() {
+  printf "%s [y/N]: " "$1"
+  read -r ans || ans=""
+  case "${ans:-n}" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+mkdir -p "$BASE" "$OC_DIR"
+
+say "Experimental local embeddings setup"
+if ! command -v openclaw >/dev/null 2>&1; then
+  echo "ERROR: openclaw command not found. Install OpenClaw first." >&2
+  exit 1
+fi
+
+if command -v node >/dev/null 2>&1; then
+  node_version="$(node --version)"
+  echo "Node: $node_version"
+  node_major="$(printf "%s" "$node_version" | sed -E 's/^v([0-9]+).*/\1/')"
+  case "$node_major" in
+    ""|*[!0-9]*) warn "Could not detect Node major version" ;;
+    *) [ "$node_major" -ge 24 ] || warn "Node major is $node_major; @openclaw/llama-cpp-provider may need Node 24+" ;;
+  esac
+else
+  warn "node not found; plugin install may fail"
+fi
+
+say "Installing @openclaw/llama-cpp-provider"
+openclaw plugins install @openclaw/llama-cpp-provider || warn "Plugin install failed. Continue to config/snippet."
+
+write_snippet() {
+  cat > "$SNIPPET" <<EOF
+{
+  memorySearch: {
+    provider: "local",
+    local: {
+      modelPath: "$MODEL_PATH",
+      contextSize: 1024
+    },
+    sync: {
+      embeddingBatchTimeoutSeconds: 900
+    }
+  }
+}
+EOF
+  cat <<EOF
+Could not safely patch $CONFIG.
+Snippet written to:
+  $SNIPPET
+
+Integrate this snippet manually into ~/.openclaw/openclaw.json.
+EOF
+}
+
+if [ -f "$CONFIG" ]; then
+  backup="$CONFIG.backup-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$CONFIG" "$backup"
+  echo "Backup: $backup"
+  if command -v node >/dev/null 2>&1; then
+    if node - "$CONFIG" "$MODEL_PATH" <<'NODE'
+const fs = require("fs");
+const [configPath, modelPath] = process.argv.slice(2);
+let data;
+try {
+  data = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch {
+  process.exit(2);
+}
+data.memorySearch = {
+  ...(data.memorySearch || {}),
+  provider: "local",
+  local: {
+    ...((data.memorySearch && data.memorySearch.local) || {}),
+    modelPath,
+    contextSize: 1024,
+  },
+  sync: {
+    ...((data.memorySearch && data.memorySearch.sync) || {}),
+    embeddingBatchTimeoutSeconds: 900,
+  },
+};
+fs.writeFileSync(configPath, JSON.stringify(data, null, 2) + "\n");
+NODE
+    then
+      echo "Updated $CONFIG"
+    else
+      warn "$CONFIG is not strict JSON or could not be edited safely"
+      cp -p "$backup" "$CONFIG" 2>/dev/null || true
+      write_snippet
+    fi
+  else
+    write_snippet
+  fi
+else
+  warn "$CONFIG does not exist yet"
+  write_snippet
+fi
+
+say "Non-destructive verification"
+openclaw memory status --deep --agent main || warn "memory status failed"
+
+if ask_default_no "Run memory index now? This can download the model and take a long time."; then
+  openclaw memory index --force --agent main || warn "memory index failed"
+else
+  echo "Skipped indexing. Later:"
+  echo "  openclaw memory index --force --agent main"
+fi
