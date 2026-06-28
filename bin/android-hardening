@@ -36,3 +36,12 @@ try cmd appops set com.termux RUN_IN_BACKGROUND allow
 echo "Opening battery optimization/settings screens for manual confirmation if Android requires it."
 try am start -a android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
 try am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:com.termux
+
+echo
+echo "Current checks:"
+printf "Phantom Process Killer: "
+run_android settings get global settings_enable_monitor_phantom_procs 2>/dev/null || echo "unknown"
+echo "Doze whitelist:"
+run_android cmd deviceidle whitelist 2>/dev/null | grep -E 'com\.termux(\.boot)?' || echo "unknown or not listed"
+echo
+echo "Reminder: set Termux battery usage to Unrestricted manually if Android requires confirmation."

@@ -2,7 +2,13 @@
 set -u
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
-SRC_DIRS="/sdcard/Shizuku $HOME/storage/shared/Shizuku"
+SRC_DIRS="/sdcard/Shizuku $HOME/storage/shared/Shizuku /storage/emulated/0/Shizuku"
+
+if [ ! -d "$HOME/storage/shared" ]; then
+  echo "Termux storage is not configured. If export files are not visible, run:"
+  echo "  termux-setup-storage"
+  echo
+fi
 
 for dir in $SRC_DIRS; do
   if [ -f "$dir/rish" ] && [ -f "$dir/rish_shizuku.dex" ]; then
@@ -18,7 +24,16 @@ for dir in $SRC_DIRS; do
     fi
     echo "Installed rish from $dir"
     rish -c 'id' || {
-      echo "rish installed, but Shizuku is not running or Termux is not authorized yet."
+      cat <<'EOF'
+rish installed, but test failed.
+
+Check:
+  1. Open Shizuku.
+  2. Start Shizuku by Wireless Debugging.
+  3. Authorize Termux.
+  4. Export terminal files again if needed.
+  5. Run: setup-shizuku-rish
+EOF
       exit 2
     }
     exit 0
@@ -37,5 +52,8 @@ Expected files:
 
 Then run:
   setup-shizuku-rish
+
+If Termux cannot see storage, run:
+  termux-setup-storage
 EOF
 exit 1

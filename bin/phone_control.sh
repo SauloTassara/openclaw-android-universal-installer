@@ -21,6 +21,26 @@ EOF
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+is_uint() {
+  case "${1:-}" in
+    ""|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+valid_package() {
+  printf "%s" "$1" | grep -Eq '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$'
+}
+
+valid_url() {
+  printf "%s" "$1" | grep -Eq '^(https?://|geo:|market:|intent:)[^[:space:]`$\\]+$'
+}
+
+valid_screenshot_path() {
+  printf "%s" "$1" | grep -Eq '^/sdcard/[A-Za-z0-9._/-]+\.png$' &&
+    printf "%s" "$1" | grep -Eq '^/sdcard/openclaw_[A-Za-z0-9._/-]*\.png$|^/sdcard/[A-Za-z0-9._/-]+\.png$'
+}
+
 quote_shell() {
   printf "%s" "$1" | sed "s/'/'\\\\''/g"
 }
@@ -50,10 +70,12 @@ case "$cmd" in
   recent) run_android "input keyevent 187" ;;
   tap)
     [ $# -eq 2 ] || die "tap needs X Y"
+    is_uint "$1" && is_uint "$2" || die "tap coordinates must be non-negative integers"
     run_android "input tap $1 $2"
     ;;
   swipe)
     [ $# -ge 4 ] || die "swipe needs X1 Y1 X2 Y2 [duration_ms]"
+    is_uint "$1" && is_uint "$2" && is_uint "$3" && is_uint "$4" && is_uint "${5:-300}" || die "swipe values must be non-negative integers"
     run_android "input swipe $1 $2 $3 $4 ${5:-300}"
     ;;
   text)
@@ -63,14 +85,17 @@ case "$cmd" in
     ;;
   open-app)
     [ $# -eq 1 ] || die "open-app needs package"
+    valid_package "$1" || die "invalid Android package name"
     run_android "monkey -p '$(quote_shell "$1")' -c android.intent.category.LAUNCHER 1"
     ;;
   open-url)
     [ $# -eq 1 ] || die "open-url needs URL"
+    valid_url "$1" || die "URL scheme must be http://, https://, geo:, market:, or intent:"
     run_android "am start -a android.intent.action.VIEW -d '$(quote_shell "$1")'"
     ;;
   screenshot)
     path="${1:-/sdcard/openclaw_screenshot_$(date +%Y%m%d_%H%M%S).png}"
+    valid_screenshot_path "$path" || die "screenshot path must be /sdcard/...png"
     run_android "screencap -p '$(quote_shell "$path")'"
     echo "$path"
     ;;
@@ -88,7 +113,7 @@ case "$cmd" in
     ;;
   brightness)
     [ $# -eq 1 ] || die "brightness needs 0..255"
-    case "$1" in *[!0-9]*|"") die "brightness must be numeric" ;; esac
+    is_uint "$1" || die "brightness must be numeric"
     [ "$1" -ge 0 ] && [ "$1" -le 255 ] || die "brightness must be 0..255"
     run_android "settings put system screen_brightness $1"
     ;;
