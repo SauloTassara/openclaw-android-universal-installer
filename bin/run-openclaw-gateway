@@ -1,0 +1,64 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+BASE="$HOME/.openclaw-android"
+LOG="$BASE/logs/openclaw-gateway.log"
+OC_ENV="$HOME/.openclaw/android-provider.env"
+TERMUX_EXEC_LIB="$PREFIX/lib/libtermux-exec.so"
+
+mkdir -p "$BASE/logs"
+cd "$HOME" || exit 1
+
+export PATH="$PREFIX/bin:$HOME/.local/bin:$BASE/bin:$PATH"
+export NODE_OPTIONS="${NODE_OPTIONS:-} --dns-result-order=ipv4first"
+export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
+
+if [ -f "$TERMUX_EXEC_LIB" ]; then
+  case ":${LD_PRELOAD:-}:" in
+    *":$TERMUX_EXEC_LIB:"*) ;;
+    *) export LD_PRELOAD="$TERMUX_EXEC_LIB${LD_PRELOAD:+:$LD_PRELOAD}" ;;
+  esac
+fi
+
+# shellcheck disable=SC1090
+[ -f "$OC_ENV" ] && . "$OC_ENV"
+
+log() {
+  printf '%s [runner] %s\n' "$(date -Iseconds)" "$*" >> "$LOG"
+}
+
+openclaw_bin() {
+  if [ -x "$PREFIX/bin/openclaw" ]; then
+    printf '%s\n' "$PREFIX/bin/openclaw"
+    return 0
+  fi
+  command -v openclaw 2>/dev/null || return 1
+}
+
+openclaw_uses_node_shebang() {
+  oc_bin="$1"
+  first_line="$(head -n 1 "$oc_bin" 2>/dev/null || true)"
+  case "$first_line" in
+    *node*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_openclaw() {
+  oc_bin="$(openclaw_bin)" || {
+    log "openclaw not found"
+    return 127
+  }
+
+  node_bin="$PREFIX/bin/node"
+  if [ -x "$node_bin" ] && openclaw_uses_node_shebang "$oc_bin"; then
+    log "exec: $node_bin $oc_bin gateway"
+    "$node_bin" "$oc_bin" gateway >> "$LOG" 2>&1
+  else
+    log "exec: $oc_bin gateway"
+    "$oc_bin" gateway >> "$LOG" 2>&1
+  fi
+}
+
+run_openclaw
