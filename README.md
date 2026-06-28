@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/SauloTassara/openclaw-android-unive
 Branch test command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/stabilize-latest-android-install/install.sh -o ~/install-openclaw-android.sh && chmod +x ~/install-openclaw-android.sh && RAW_BASE=https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/stabilize-latest-android-install bash ~/install-openclaw-android.sh
+curl -fsSL https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/android17-boot-fix/install.sh -o ~/install-openclaw-android.sh && chmod +x ~/install-openclaw-android.sh && RAW_BASE=https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/android17-boot-fix bash ~/install-openclaw-android.sh
 ```
 
 When testing a branch, `install.sh` must receive `RAW_BASE` from that same branch. Otherwise it downloads helper scripts from `main`.
@@ -42,15 +42,44 @@ The installer creates:
 ~/.termux/boot/00-openclaw
 ```
 
+Gateway helpers:
+
+```bash
+~/.openclaw-android/bin/start-openclaw-gateway
+~/.openclaw-android/bin/run-openclaw-gateway
+~/.openclaw-android/bin/stop-openclaw-gateway
+~/.openclaw-android/bin/restart-openclaw-gateway
+~/.openclaw-android/bin/status-openclaw-gateway
+```
+
 Boot script behavior:
 
 ```bash
 termux-wake-lock  # if available
-sleep 20
-oc-start
+sleep 60
+~/.openclaw-android/bin/start-openclaw-gateway
 ```
 
 `termux-wake-lock` needs both the Termux package `termux-api` and the Termux:API Android app. If missing, install continues and warns.
+
+### Why boot uses a dedicated runner
+
+Termux:Boot does not always load the same interactive shell environment as a normal Termux session. During Android 12 reboot testing, `00-openclaw` executed, but gateway startup failed with:
+
+```text
+/data/data/com.termux/files/usr/bin/openclaw: /usr/bin/env: bad interpreter: No such file or directory
+```
+
+The fix is intentional:
+
+- install `termux-exec`
+- set `LD_PRELOAD=$PREFIX/lib/libtermux-exec.so` when available
+- avoid calling `oc-start` from boot
+- call `~/.openclaw-android/bin/start-openclaw-gateway` directly
+- run OpenClaw through `node /data/data/com.termux/files/usr/bin/openclaw` when the OpenClaw bin has a Node shebang
+- start the gateway inside tmux using `run-openclaw-gateway`
+
+This keeps reboot startup working even when `/usr/bin/env` is unavailable in the boot environment.
 
 ## OpenClaw version policy
 
@@ -130,7 +159,7 @@ openclaw: 1 windows
 Config valid: ~/.openclaw/openclaw.json
 ```
 
-`oc-start` runs `openclaw config validate` first and refuses to start if config is invalid.
+`oc-start` runs `openclaw config validate` first and refuses to start if config is invalid. On Termux it also handles the `/usr/bin/env` shebang issue by using `termux-exec` and a Node fallback.
 
 ## Phone control
 
@@ -223,15 +252,23 @@ tmux ls
 3. Turn screen off for 30-60 min, send `/status`.
 4. Test again after 2-4 h.
 5. Remove Termux from recent apps, wait 30 min, send `/status`.
-6. Reboot, wait 1-2 min, send `/status`.
+6. Reboot, wait 5 min, send `/status`.
 
 If it does not respond after reboot:
 
 ```bash
 tmux ls
 oc-status
-tail -n 100 ~/.openclaw-android/logs/openclaw-gateway.log
+tail -n 120 ~/.openclaw-android/logs/boot.log
+tail -n 120 ~/.openclaw-android/logs/openclaw-gateway.log
 ```
+
+Interpretation:
+
+- `0 sessions` and boot log says `/usr/bin/env: bad interpreter`: install or rerun this branch; old boot helper is still installed.
+- `0 sessions` and boot log says `config validate failed`: run `openclaw doctor --fix`, then `openclaw config validate`, then `oc-start`.
+- `openclaw: 1 windows` but Telegram does not answer: check model/provider quota and Telegram logs.
+- `RESOURCE_EXHAUSTED` / `429`: gateway is alive, but the selected Gemini API quota is exhausted. Change model or configure fallback.
 
 If Telegram replies `You are not authorized to use this command`, gateway and token may be fine. Authorize your Telegram user ID. Get it with `@userinfobot`, then rerun `openclaw onboard` or edit OpenClaw config, then:
 
@@ -257,8 +294,6 @@ pkg reinstall -y openssl libngtcp2 libnghttp2 libnghttp3 libcurl curl
 hash -r
 curl --version
 ```
-
-## If pacman/glibc-runner fails
 
 Observed:
 
@@ -345,7 +380,8 @@ oc-status
 tmux ls
 phone-control battery
 phone-control ui-dump | head -n 20
-tail -n 100 ~/.openclaw-android/logs/openclaw-gateway.log
+tail -n 120 ~/.openclaw-android/logs/boot.log
+tail -n 120 ~/.openclaw-android/logs/openclaw-gateway.log
 ```
 
 ## Uninstall helpers

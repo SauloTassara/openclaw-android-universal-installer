@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/bash
 set -u
 
 if tmux kill-session -t openclaw 2>/dev/null; then

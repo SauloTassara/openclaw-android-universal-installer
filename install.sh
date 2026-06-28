@@ -69,13 +69,15 @@ fi
 export NODE_OPTIONS=--dns-result-order=ipv4first
 append_once "$HOME/.bashrc" 'export NODE_OPTIONS=--dns-result-order=ipv4first'
 append_once "$HOME/.profile" 'export NODE_OPTIONS=--dns-result-order=ipv4first'
+append_once "$HOME/.bashrc" 'export RISH_APPLICATION_ID=com.termux'
+append_once "$HOME/.profile" 'export RISH_APPLICATION_ID=com.termux'
 
 say "Updating Termux packages"
 pkg update -y || warn "pkg update failed; continuing"
 pkg upgrade -y || warn "pkg upgrade failed; continuing"
 
 say "Installing dependencies"
-pkg install -y curl git nodejs openssh tmux nano android-tools nmap jq coreutils procps termux-api || {
+pkg install -y curl git nodejs openssh tmux nano android-tools nmap jq coreutils procps termux-api termux-exec || {
   warn "Some packages failed. Re-run install.sh after checking Termux mirrors."
 }
 
@@ -89,6 +91,7 @@ download_bin setup-shizuku-rish || exit 1
 download_bin android-hardening || exit 1
 download_bin fix-termux-pacman || exit 1
 download_bin start-openclaw-gateway || exit 1
+download_bin run-openclaw-gateway || exit 1
 download_bin stop-openclaw-gateway || exit 1
 download_bin restart-openclaw-gateway || exit 1
 download_bin status-openclaw-gateway || exit 1
@@ -137,13 +140,41 @@ Do not use arbitrary shell execution for phone control.
 If an action is irreversible or security-sensitive, ask for confirmation first.
 AGENTS
 
+# Keep Termux:Boot simple and deterministic. Do not call oc-start here: boot
+# sessions may not have interactive profile fixes loaded yet, and npm binaries
+# with /usr/bin/env shebangs can fail unless termux-exec/node fallback is set.
 cat > "$BOOT_DIR/00-openclaw" <<'BOOT'
 #!/data/data/com.termux/files/usr/bin/sh
-if [ -x /data/data/com.termux/files/usr/bin/termux-wake-lock ]; then
-  /data/data/com.termux/files/usr/bin/termux-wake-lock >/dev/null 2>&1 || true
+
+PREFIX="/data/data/com.termux/files/usr"
+BASE="$HOME/.openclaw-android"
+LOG="$BASE/logs/boot.log"
+TERMUX_EXEC_LIB="$PREFIX/lib/libtermux-exec.so"
+
+if [ -x "$PREFIX/bin/termux-wake-lock" ]; then
+  "$PREFIX/bin/termux-wake-lock" >/dev/null 2>&1 || true
 fi
-sleep 20
-exec /data/data/com.termux/files/usr/bin/oc-start >/dev/null 2>&1
+
+# Android can report boot completed before networking, storage, or package
+# manager state is stable. 60s is conservative for Android 12 through stock
+# Pixel-class Android 17.
+sleep "${OPENCLAW_BOOT_DELAY:-60}"
+
+export PATH="$PREFIX/bin:$HOME/.local/bin:$BASE/bin:$PATH"
+export NODE_OPTIONS="${NODE_OPTIONS:-} --dns-result-order=ipv4first"
+export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
+
+if [ -f "$TERMUX_EXEC_LIB" ]; then
+  LD_PRELOAD="$TERMUX_EXEC_LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+  export LD_PRELOAD
+fi
+
+mkdir -p "$BASE/logs"
+printf '%s [boot] starting 00-openclaw\n' "$(date -Iseconds)" >> "$LOG"
+"$BASE/bin/start-openclaw-gateway" >> "$LOG" 2>&1
+code="$?"
+printf '%s [boot] finished with code %s\n' "$(date -Iseconds)" "$code" >> "$LOG"
+exit "$code"
 BOOT
 chmod +x "$BOOT_DIR/00-openclaw"
 
@@ -210,6 +241,7 @@ Commands:
   phone-control ui-dump
   android-hardening
   tmux ls
+  tail -n 100 ~/.openclaw-android/logs/boot.log
   tail -n 100 ~/.openclaw-android/logs/openclaw-gateway.log
 
 Log:

@@ -10,15 +10,10 @@ TERMUX_EXEC_LIB="$PREFIX/lib/libtermux-exec.so"
 mkdir -p "$BASE/logs"
 cd "$HOME" || exit 1
 
-# Put Termux first. This is important during Termux:Boot, where the normal
-# interactive profile environment is not guaranteed to be loaded yet.
 export PATH="$PREFIX/bin:$HOME/.local/bin:$BASE/bin:$PATH"
 export NODE_OPTIONS="${NODE_OPTIONS:-} --dns-result-order=ipv4first"
 export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
 
-# termux-exec rewrites hard-coded Linux shebangs such as /usr/bin/env.
-# Keep this even though run_openclaw also has a node fallback, because child
-# processes spawned by OpenClaw or plugins may still need the rewrite.
 if [ -f "$TERMUX_EXEC_LIB" ]; then
   case ":${LD_PRELOAD:-}:" in
     *":$TERMUX_EXEC_LIB:"*) ;;
@@ -26,12 +21,11 @@ if [ -f "$TERMUX_EXEC_LIB" ]; then
   esac
 fi
 
-# Provider keys are stored outside the installer directory and are not printed.
 # shellcheck disable=SC1090
 [ -f "$OC_ENV" ] && . "$OC_ENV"
 
 log() {
-  printf '%s [start-helper] %s\n' "$(date -Iseconds)" "$*" >> "$LOG"
+  printf '%s [runner] %s\n' "$(date -Iseconds)" "$*" >> "$LOG"
 }
 
 openclaw_bin() {
@@ -59,42 +53,12 @@ run_openclaw() {
 
   node_bin="$PREFIX/bin/node"
   if [ -x "$node_bin" ] && openclaw_uses_node_shebang "$oc_bin"; then
-    "$node_bin" "$oc_bin" "$@"
+    log "exec: $node_bin $oc_bin gateway"
+    "$node_bin" "$oc_bin" gateway >> "$LOG" 2>&1
   else
-    "$oc_bin" "$@"
+    log "exec: $oc_bin gateway"
+    "$oc_bin" gateway >> "$LOG" 2>&1
   fi
 }
 
-log "requested"
-log "PATH=$PATH"
-log "LD_PRELOAD=${LD_PRELOAD:-}"
-
-if tmux has-session -t openclaw 2>/dev/null; then
-  log "openclaw gateway already running"
-  echo "openclaw gateway already running"
-  exit 0
-fi
-
-run_openclaw config validate >> "$LOG" 2>&1
-if [ "$?" -ne 0 ]; then
-  log "config validate failed"
-  exit 1
-fi
-
-if [ ! -x "$BASE/bin/run-openclaw-gateway" ]; then
-  log "$BASE/bin/run-openclaw-gateway missing or not executable"
-  exit 1
-fi
-
-tmux new-session -d -s openclaw "$BASE/bin/run-openclaw-gateway"
-
-sleep 5
-
-if tmux has-session -t openclaw 2>/dev/null; then
-  log "openclaw gateway started in tmux"
-  echo "openclaw gateway started in tmux session: openclaw"
-  exit 0
-else
-  log "failed to create tmux session"
-  exit 1
-fi
+run_openclaw
