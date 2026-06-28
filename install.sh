@@ -35,7 +35,10 @@ download_bin() {
   url="$RAW_BASE/bin/$name"
   target="$BIN_DIR/$name"
   say "Installing $name"
-  curl -fsSL "$url" -o "$target"
+  if ! curl -fsSL "$url" -o "$target"; then
+    echo "ERROR: failed to download $url" >&2
+    return 1
+  fi
   chmod +x "$target"
 }
 
@@ -92,13 +95,13 @@ else
 fi
 
 say "Downloading helper scripts from repo"
-download_bin phone_control.sh
-download_bin setup-shizuku-rish
-download_bin android-hardening
-download_bin start-openclaw-gateway
-download_bin stop-openclaw-gateway
-download_bin restart-openclaw-gateway
-download_bin status-openclaw-gateway
+download_bin phone_control.sh || exit 1
+download_bin setup-shizuku-rish || exit 1
+download_bin android-hardening || exit 1
+download_bin start-openclaw-gateway || exit 1
+download_bin stop-openclaw-gateway || exit 1
+download_bin restart-openclaw-gateway || exit 1
+download_bin status-openclaw-gateway || exit 1
 
 say "Linking commands"
 link_bin start-openclaw-gateway oc-start

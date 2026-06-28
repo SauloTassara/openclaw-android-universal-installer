@@ -12,6 +12,12 @@ Review `install.sh` before piping any remote script into `bash`.
 curl -fsSL https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/main/install.sh | bash
 ```
 
+To test a branch before merge, pass `RAW_BASE` from that same branch. Otherwise `install.sh` will download helper scripts from `main`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/hardening-and-test-readiness/install.sh | RAW_BASE=https://raw.githubusercontent.com/SauloTassara/openclaw-android-universal-installer/hardening-and-test-readiness bash
+```
+
 ## Manual steps that cannot be fully automated
 
 1. Install Termux from F-Droid, not Play Store.

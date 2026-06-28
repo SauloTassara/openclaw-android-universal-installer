@@ -37,8 +37,8 @@ valid_url() {
 }
 
 valid_screenshot_path() {
-  printf "%s" "$1" | grep -Eq '^/sdcard/[A-Za-z0-9._/-]+\.png$' &&
-    printf "%s" "$1" | grep -Eq '^/sdcard/openclaw_[A-Za-z0-9._/-]*\.png$|^/sdcard/[A-Za-z0-9._/-]+\.png$'
+  case "$1" in *".."*) return 1 ;; esac
+  printf "%s" "$1" | grep -Eq '^/sdcard/[A-Za-z0-9._/-]+\.png$'
 }
 
 quote_shell() {
